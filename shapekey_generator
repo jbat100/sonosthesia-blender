@@ -1,0 +1,121 @@
+import bpy
+import math
+import random
+
+def clean_scene():
+    for obj in bpy.data.objects:
+        bpy.data.objects.remove(obj)
+    for obj in bpy.data.textures:
+        bpy.data.textures.remove(obj)   
+        
+def create_cube():
+    bpy.ops.mesh.primitive_cube_add(size=1)
+    return bpy.context.object   
+
+def create_armature():
+    bpy.ops.object.armature_add(location=(0, 0, 0), scale=(1, 1, 1))
+    return bpy.context.object
+ 
+def create_voronoi_texture(noise_intensity, noise_scale):
+    texture = bpy.data.textures.new('voronoi', type='VORONOI')
+    texture.distance_metric = 'DISTANCE_SQUARED'
+    texture.noise_intensity = noise_intensity
+    texture.noise_scale = noise_scale
+    return texture
+
+def subdivide(obj, name, levels):
+    modifier = obj.modifiers.new(type='SUBSURF', name=name)
+    modifier.levels = levels
+    return modifier
+    
+def displace(obj, name):
+    modifier = obj.modifiers.new(type='DISPLACE', name=name)
+    texture = create_voronoi_texture(random.uniform(1, 1.5), random.uniform(0.4, 0.7))
+    modifier.texture = texture
+    modifier.strength = random.uniform(0.1, 0.3)
+    return modifier
+    
+def offset_vertices(obj, scale):
+    for vertex in obj.data.vertices:
+        direction = vertex.normal
+        direction[0] += random.uniform(-0.5,0.5)
+        direction[1] += random.uniform(-0.5,0.5)
+        direction[2] += random.uniform(-0.5,0.5)
+        vertex.co += direction * scale
+        
+def apply_modifiers(obj):
+    for modifier in obj.modifiers:
+        bpy.ops.object.modifier_apply(modifier=modifier.name)
+        
+def create_displace_shape_key(obj, name):
+    modifier = displace(obj, name)
+    print(dir(modifier))
+    #cube.modifier_apply_as_shapekey(keep_modifier=False, modifier="Displace")
+    bpy.ops.object.modifier_apply_as_shapekey(keep_modifier=False, modifier=name)
+      
+def create_bone(armature, name):
+    bone = armature.data.edit_bones.new(name)
+    bone.head = (0, 0, 1) # if the head and tail are the same, the bone is deleted
+    bone.tail = (0, 0, 2)  
+    return bone
+    
+# https://blender.stackexchange.com/questions/39127/how-to-put-together-a-driver-with-python    
+# https://docs.blender.org/api/2.79/bpy.types.bpy_struct.html#bpy.types.bpy_struct.driver_add
+# https://blender.stackexchange.com/questions/13905/add-driver-for-a-shapekey-via-python
+# https://blender.stackexchange.com/questions/23563/how-to-bake-softbody-animation-into-keyframes
+
+def add_driver(
+        source, target, prop, dataPath,
+        index = -1, negative = False, func = ''
+    ):
+    ''' Add driver to source prop (at index), driven by target dataPath '''
+    if index != -1:
+        d = source.driver_add( prop, index ).driver
+    else:
+        d = source.driver_add( prop ).driver
+    v = d.variables.new()
+    v.name                 = prop
+    v.targets[0].id        = target
+    v.targets[0].data_path = dataPath
+    d.expression = func + "(" + v.name + ")" if func else v.name
+    d.expression = d.expression if not negative else "-1 * " + d.expression
+        
+def create_animations():
+    cube = create_cube()
+    modifier = subdivide(cube, 'Subdivide', 4)
+    offset_vertices(cube, 1)
+    apply_modifiers(cube)
+    iterations = 5
+    for i in range(iterations):
+        create_displace_shape_key(cube, 'Displace' + str(i))
+        
+def create_drivers(obj):  
+    armature = create_armature()
+    bpy.ops.object.mode_set(mode='EDIT', toggle=False)    
+    for key_block in obj.data.shape_keys.key_blocks:
+        if key_block.name != 'Basis':
+            print("Shape keys for " + str(cube) + ": " + str(key_block))
+            bone = create_bone(armature, key_block.name)
+            print("Bone center "+ str(bone.center))
+            driver = key_block.driver_add('value').driver
+            driver.expression = 'var + 0.0'
+            driver_variable = driver.variables.new()
+            driver_variable.name = 'value'
+            driver_variable.targets[0].id = armature
+            print(driver_variable)
+            
+def create_shapekeys(obj):
+    iterations = 5
+    for i in range(iterations):
+        create_displace_shape_key(obj, 'Displace' + str(i))
+        
+def run():
+    cube = create_cube()
+    modifier = subdivide(cube, 'Subdivide', 4)
+    #offset_vertices(cube, 1)
+    #apply_modifiers(cube)
+    #create_shapekeys(cube)
+        
+        
+clean_scene()
+run()
